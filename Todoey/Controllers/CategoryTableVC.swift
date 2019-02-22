@@ -7,24 +7,32 @@
 //
 
 import UIKit
-import CoreData
+import RealmSwift
+import ChameleonFramework
 
-class CategoryTableVC: UITableViewController {
+
+class CategoryTableVC: SwipeTableVC {
     
     //MARK: - Properties
-    var categoryArray: [Category] = []
-    let context = (UIApplication.shared.delegate as! AppDelegate).persistentContainer.viewContext
+    let realm = try! Realm()
+    
+    var categories: Results<Category>?
 
     override func viewDidLoad() {
         super.viewDidLoad()
         
         loadCategories()
+        
+        tableView.separatorStyle = .none
+        
     }
     
     //MARK: - Methods
-    func saveItems() {
+    func save(category: Category) {
         do {
-            try context.save()
+            try realm.write {
+                realm.add(category)
+            }
         } catch {
             print("Error saving context: \(error)")
         }
@@ -33,15 +41,26 @@ class CategoryTableVC: UITableViewController {
     }
     
     func loadCategories() {
-        let request: NSFetchRequest<Category> = Category.fetchRequest()
-        
-        do {
-            self.categoryArray = try context.fetch(request)
-        } catch {
-            print("Error saving context: \(error)")
-        }
+        categories = realm.objects(Category.self)
         
         tableView.reloadData()
+    }
+    
+    //MARK: - Delete Data From Swipe
+    override func updateModel(at indexPath: IndexPath) {
+        if let categoryForDeletion = self.categories?[indexPath.row] {
+            do {
+                try self.realm.write {
+                    let toDoItems = categoryForDeletion.items
+                    
+                    self.realm.delete(toDoItems)
+                    
+                    self.realm.delete(categoryForDeletion)
+                }
+            } catch {
+                print("Error saving done status: \(error)")
+            }
+        }
     }
     
 
@@ -53,12 +72,11 @@ class CategoryTableVC: UITableViewController {
         let action = UIAlertAction(title: "Add Category", style: .default) { (action) in
             print("Success")
             
-            let newCategory = Category(context: self.context)
+            let newCategory = Category()
             newCategory.name = textField.text!
+            newCategory.color = UIColor.randomFlat.hexValue()
             
-            self.categoryArray.append(newCategory)
-            
-            self.saveItems()
+            self.save(category: newCategory)
         }
         
         alert.addTextField { (alertTextField) in
@@ -78,15 +96,22 @@ extension CategoryTableVC {
     
     //MARK: TableView Datasource Methods
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        return categoryArray.count
+        return categories?.count ?? 1
     }
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "categoryCell", for: indexPath)
+        let cell = super.tableView(tableView, cellForRowAt: indexPath)
         
-        let category = categoryArray[indexPath.row]
-        
-        cell.textLabel?.text = category.name
+        if let category = categories?[indexPath.row] {
+            cell.textLabel?.text = category.name
+            
+            guard let categoryColor = UIColor(hexString: category.color) else { fatalError() }
+            
+            cell.backgroundColor = categoryColor
+            cell.textLabel?.textColor = ContrastColorOf(categoryColor, returnFlat: true)
+        } else {
+            cell.textLabel?.text = "No Categories Added Yet"
+        }
         
         return cell
     }
@@ -94,15 +119,19 @@ extension CategoryTableVC {
     
     //MARK: TableView Delegate Methods
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-
-        performSegue(withIdentifier: "goToItems", sender: nil)
+        if let categories = categories {
+            if categories.count > 0 {
+                performSegue(withIdentifier: "goToItems", sender: nil)
+            }
+        }
+        tableView.deselectRow(at: indexPath, animated: true)
     }
     
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
         let destinationVC = segue.destination as! ToDoListTableVC
         
         if let indexPath = tableView.indexPathForSelectedRow {
-            destinationVC.selectedCategory = categoryArray[indexPath.row]
+            destinationVC.selectedCategory = categories?[indexPath.row]
         }
     }
 }
